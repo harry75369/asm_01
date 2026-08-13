@@ -16,6 +16,15 @@ A stupid-simple framework for `x86_64` assembly language programming using `limi
 
 You can start programming by editing the files under `demos`.
 
+# Why
+
+I want to teach kids old-style assembly language programming, however, I don't want
+- Teach ancient 8-bit/16-bit/32-bit assembly
+- Run assembly on expensive dev-boards with proprietary firmware
+- Complex OSes with distracting details
+
+The not-so-obvious choice is x86_64 machines that is ubiquitous and cheap enough, with open standards established long long ago. And assembly could run on bare-metal easily with modern bootloader like Limine.
+
 # Usage
 
 Use `prepare.sh` to prepare the limine environment.
@@ -28,7 +37,7 @@ Use `prepare.sh` to prepare the limine environment.
 # Dependencies
 
 - `nasm` (assembler)
-- `ld` (linker, from binutils)
+- `ld` (linker, from GNU binutils)
 - `xorriso` (ISO builder)
 - `qemu-system-x86_64` (test runner)
 - `OVMF` firmware blobs (`OVMF_CODE.fd`, `OVMF_VARS.fd`) — required only for `make run-uefi`.
