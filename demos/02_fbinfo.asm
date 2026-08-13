@@ -68,7 +68,7 @@ _start:
     DEBUG_PUTHEX
 
     DEBUG_NEWLINE
-    HALT
+    WAIT_KEY_AND_REBOOT
 
 .fail:
     DEBUG_PUTS msg_fail

@@ -161,7 +161,7 @@ _start:
     jmp .draw_char
 
 .done:
-    HALT
+    WAIT_KEY_AND_REBOOT
 
 .fail:
     DEBUG_PUTS msg_fail

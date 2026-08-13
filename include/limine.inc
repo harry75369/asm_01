@@ -156,6 +156,56 @@ limine_fb_response_ptr:
     jmp %%halt
 %endmacro
 
+; Reset the system immediately via triple fault.
+; Loads a null IDT (limit=0) then triggers an interrupt, causing
+; a triple fault which forces the CPU to reset.
+; Works universally in QEMU and on real x86 hardware.
+; Clobbers: nothing (does not return)
+%macro REBOOT 0
+    lidt [rel %%idt_ptr]
+    int 3
+%%idt_ptr:
+    dw 0                ; limit = 0 (no IDT entries)
+    dq 0                ; base = 0
+%endmacro
+
+; Wait for any keypress, then reboot back to the Limine menu.
+; Polls the 8042 keyboard controller status port.
+; Drains leftover scancodes from Limine menu navigation first,
+; with a debounce delay so slow key-release scancodes (which
+; arrive after the initial drain) don't trigger an immediate
+; reboot. BIOS mode only; UEFI is unaffected.
+; Clobbers: rax, rcx
+%macro WAIT_KEY_AND_REBOOT 0
+    ; Phase 1: drain pending scancodes
+%%drain1:
+    in al, 0x64
+    test al, 0x01        ; output buffer full?
+    jz %%delay           ; empty — enter debounce
+    in al, 0x60          ; discard stale scancode
+    jmp %%drain1
+    ; Phase 2: debounce delay (~50-100ms) for in-flight key releases
+%%delay:
+    mov ecx, 100000000
+%%spin:
+    dec ecx
+    jnz %%spin
+    ; Phase 3: drain again after the delay
+%%drain2:
+    in al, 0x64
+    test al, 0x01
+    jz %%wait            ; truly empty now
+    in al, 0x60
+    jmp %%drain2
+    ; Phase 4: wait for a genuine new keypress
+%%wait:
+    in al, 0x64
+    test al, 0x01
+    jz %%wait
+    in al, 0x60
+    REBOOT
+%endmacro
+
 ; Reference Limine request symbols to prevent linker from discarding them
 ; Call this at the start of _start
 %macro KEEP_REQUESTS 0

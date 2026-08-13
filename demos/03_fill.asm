@@ -54,7 +54,7 @@ _start:
     dec rcx
     jnz .fill
 
-    HALT
+    WAIT_KEY_AND_REBOOT
 
 .fail:
     DEBUG_PUTS msg_fail

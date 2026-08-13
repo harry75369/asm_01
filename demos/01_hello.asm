@@ -13,7 +13,7 @@ section .data
     LIMINE_BASE_REVISION 1
     LIMINE_REQUESTS_END
 
-    msg: db "Hello, Limine!", 10, 13, 0
+    msg: db "Hello, Limine!", 10, 13, "Press any key to return to menu...", 10, 13, 0
 
 section .text
 global _start
@@ -24,4 +24,4 @@ _start:
     ; Output the message to debugcon
     DEBUG_PUTS msg
 
-    HALT
+    WAIT_KEY_AND_REBOOT
