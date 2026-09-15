@@ -12,7 +12,7 @@ A stupid-simple framework for `x86_64` assembly language programming using `limi
   - Both BIOS and UEFI booting support.
   - Switching between multiple demos.
   - Runtime demo switching: press any key to reboot back to the Limine menu and pick another demo.
-  - Burning into a USB drive.
+  - Burning into a USB drive — or fast file-copy redeploy for repeated real-machine tests (no re-burning, see below).
 
 You can start programming by editing the files under `demos`.
 
@@ -34,13 +34,64 @@ Use `prepare.sh` to prepare the limine environment.
 - `make run-uefi`: Run the ISO image in QEMU with UEFI support.
 - `make clean`: Clean the build directory.
 
+# Real-machine USB workflow (UEFI)
+
+Re-burning the ISO to a USB stick on every change is slow and annoying (on macOS
+it also triggers `dd`, `sudo`, and "disk not readable" popups). Instead, prepare
+the stick **once** as a normal FAT32 UEFI drive, then redeploy with a plain file
+copy — no `dd`, no `sudo`, ~1 second per iteration.
+
+## One-time: format the USB stick (FAT32, label `LIMINE`)
+
+**macOS** — use Disk Utility:
+1. Insert the stick, select the **device** (not the volume), click **Erase**.
+2. Format: **MS-DOS (FAT)**, Scheme: **GUID Partition Map**, Name: **LIMINE**.
+3. It mounts at `/Volumes/LIMINE`.
+
+**Linux**:
+1. `lsblk` to find the device (e.g. `/dev/sdb`) — double-check, this wipes it.
+2. `sudo parted /dev/sdb -- mklabel gpt mkpart primary fat32 1MiB 100% set 1 esp on`
+3. `sudo mkfs.vfat -F32 -n LIMINE /dev/sdb1`
+4. It automounts (e.g. `/media/$USER/LIMINE`).
+
+## One-time: lay down the bootloader
+
+```
+make usb-init          # copies EFI/BOOT/BOOTX64.EFI + limine.conf + all ELFs
+```
+
+## Fast loop: edit, redeploy, boot
+
+```
+make deploy            # rebuilds the demos and copies only *.elf + limine.conf
+make eject             # safely flush/unmount before unplugging
+```
+
+Plug into the target machine, boot in UEFI mode, and pick a demo from the Limine
+menu. Repeat `make deploy` after every change.
+
+Notes:
+- The mount point is auto-detected by the `LIMINE` volume label. Override it with
+  `make deploy USB_MOUNT=/your/path` if detection fails.
+- UEFI boots the standard fallback path `EFI/BOOT/BOOTX64.EFI`, so no firmware
+  setup is needed. If a machine doesn't auto-boot it, use its boot menu →
+  "Boot from file" → `\EFI\BOOT\BOOTX64.EFI`.
+- Always run `make eject` (or otherwise sync) before unplugging so FAT32 writes flush.
+
 # Dependencies
 
 - `nasm` (assembler)
-- `ld` (linker, from GNU binutils)
+- A GNU `ld` that emits ELF64 (the linker) — auto-detected by the Makefile, override with `make LD=/path/to/ld`:
+  - macOS: `brew install x86_64-elf-binutils` (provides `x86_64-elf-ld`). Apple's `/usr/bin/ld` cannot link ELF and is skipped.
+  - Linux: GNU binutils `ld` (usually preinstalled).
 - `xorriso` (ISO builder)
 - `qemu-system-x86_64` (test runner)
-- `OVMF` firmware blobs (`OVMF_CODE.fd`, `OVMF_VARS.fd`) — required only for `make run-uefi`.
+- UEFI firmware blobs — required only for `make run-uefi`:
+  - macOS: bundled with Homebrew QEMU (`edk2-x86_64-code.fd`, auto-detected).
+  - Linux: `/usr/share/OVMF/OVMF_CODE.fd` + `OVMF_VARS.fd` (override with
+    `OVMF_CODE=... OVMF_VARS_TEMPLATE=...` if your distro uses other paths).
+- `findmnt` (util-linux) — optional, for Linux USB mount auto-detection.
+- The real-machine USB workflow needs no extra dependencies beyond a FAT32 stick.
 
 # Writing a new demo
 
