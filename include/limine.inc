@@ -169,40 +169,91 @@ limine_fb_response_ptr:
     dq 0                ; base = 0
 %endmacro
 
-; Wait for any keypress, then reboot back to the Limine menu.
-; Polls the 8042 keyboard controller status port.
-; Drains leftover scancodes from Limine menu navigation first,
-; with a debounce delay so slow key-release scancodes (which
-; arrive after the initial drain) don't trigger an immediate
-; reboot. BIOS mode only; UEFI is unaffected.
-; Clobbers: rax, rcx
+; Approximate auto-reboot timeout for WAIT_KEY_AND_REBOOT, in TSC ticks.
+; Assumes a ~2 GHz TSC, so the default (~6e10) is roughly 30 seconds; the
+; real duration scales inversely with CPU frequency. Override at build time
+; with: nasm -DWAIT_KEY_TIMEOUT_TICKS=<ticks> ...
+%ifndef WAIT_KEY_TIMEOUT_TICKS
+    %define WAIT_KEY_TIMEOUT_TICKS 60000000000
+%endif
+
+; Wait for a keypress, then reboot back to the Limine menu.
+;
+; Keypress detection polls the legacy i8042 keyboard controller (status
+; port 0x64, data port 0x60). That works in BIOS mode, in QEMU, and under
+; UEFI only when the firmware provides legacy USB keyboard emulation.
+; On a pure-UEFI machine with no i8042 a bare-metal kernel simply cannot
+; read the USB keyboard: Limine's own menu input uses UEFI boot services,
+; which are destroyed by ExitBootServices before the kernel starts (the
+; only EFI data that survives is the System Table's Runtime Services,
+; which have no console input). Reading port 0x64 there returns a floating
+; bus value (0xFF or 0x00), so an unbounded wait would hang forever.
+;
+; To stay robust we (a) treat a 0xFF status as "no controller" rather than
+; a keystroke, and (b) bound the wait with a TSC deadline: if no key arrives
+; in time we reboot anyway. Demo-switching therefore still works everywhere
+; (the Limine menu itself reads keys via UEFI), and machines that do have an
+; i8042 still reboot instantly on a keypress.
+;
+; Stale scancodes left over from BIOS-mode menu navigation are drained
+; first, with a short debounce so slow key-release scancodes don't trigger
+; an instant reboot.
+; Clobbers: rax, rcx, rdx, r8, r9
 %macro WAIT_KEY_AND_REBOOT 0
-    ; Phase 1: drain pending scancodes
+    ; Phase 1: drain pending scancodes (bounded; bail on a floating bus).
+    mov r9d, 16                ; a real i8042 buffer holds a single byte
 %%drain1:
     in al, 0x64
-    test al, 0x01        ; output buffer full?
-    jz %%delay           ; empty — enter debounce
-    in al, 0x60          ; discard stale scancode
-    jmp %%drain1
-    ; Phase 2: debounce delay (~50-100ms) for in-flight key releases
-%%delay:
-    mov ecx, 100000000
+    cmp al, 0xFF               ; floating bus / no i8042?
+    je %%arm
+    test al, 0x01              ; output buffer full?
+    jz %%arm                   ; empty -> done draining
+    in al, 0x60                ; discard stale scancode
+    dec r9d
+    jnz %%drain1
+
+    ; Phase 2: arm the TSC deadline, then debounce in-flight key releases.
+%%arm:
+    rdtsc                      ; edx:eax = time stamp counter
+    shl rdx, 32
+    or  rax, rdx               ; rax = 64-bit TSC
+    mov rcx, WAIT_KEY_TIMEOUT_TICKS
+    add rax, rcx
+    mov r8, rax                ; r8 = deadline (preserved across the wait)
+
+    mov ecx, 100000000         ; ~50-100 ms debounce
 %%spin:
     dec ecx
     jnz %%spin
-    ; Phase 3: drain again after the delay
+
+    ; Phase 3: drain again after the debounce (catch late key releases).
+    mov r9d, 16
 %%drain2:
     in al, 0x64
-    test al, 0x01
-    jz %%wait            ; truly empty now
-    in al, 0x60
-    jmp %%drain2
-    ; Phase 4: wait for a genuine new keypress
-%%wait:
-    in al, 0x64
+    cmp al, 0xFF
+    je %%wait
     test al, 0x01
     jz %%wait
     in al, 0x60
+    dec r9d
+    jnz %%drain2
+
+    ; Phase 4: bounded wait for a genuine keypress; auto-reboot on timeout.
+%%wait:
+    in al, 0x64
+    cmp al, 0xFF               ; floating bus -> not a keystroke
+    je %%tick
+    test al, 0x01              ; a real key arrived?
+    jnz %%gotkey
+%%tick:
+    rdtsc                      ; current TSC
+    shl rdx, 32
+    or  rax, rdx
+    cmp rax, r8
+    jb  %%wait                 ; deadline not reached -> keep waiting
+    REBOOT                     ; timeout -> return to the Limine menu
+%%gotkey:
+    in al, 0x60                ; discard the scancode
     REBOOT
 %endmacro
 

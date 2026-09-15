@@ -11,7 +11,7 @@ A stupid-simple framework for `x86_64` assembly language programming using `limi
   - Both QEMU and bare-metal x86_64 systems.
   - Both BIOS and UEFI booting support.
   - Switching between multiple demos.
-  - Runtime demo switching: press any key to reboot back to the Limine menu and pick another demo.
+  - Runtime demo switching: press any key to reboot back to the Limine menu and pick another demo. On pure-UEFI machines with no legacy (i8042) keyboard — where a bare-metal kernel cannot read USB keys — it auto-reboots to the menu after a timeout instead of hanging.
   - Burning into a USB drive — or fast file-copy redeploy for repeated real-machine tests (no re-burning, see below).
 
 You can start programming by editing the files under `demos`.
@@ -103,7 +103,7 @@ Notes:
    - `DEBUG_PUTS label`, `DEBUG_PUTHEX`, `DEBUG_NEWLINE` — write to QEMU's debugcon.
    - `KEEP_REQUESTS` — reference the request symbols so the linker does not GC them.
    - `HALT` — stop the CPU forever (use on failure paths).
-   - `WAIT_KEY_AND_REBOOT` — wait for a keypress then reboot back to the Limine menu (use on success paths).
+   - `WAIT_KEY_AND_REBOOT` — wait for a keypress then reboot back to the Limine menu (use on success paths). Keypress detection uses the legacy i8042 controller, so it works in BIOS/QEMU and UEFI-with-legacy-USB. On pure-UEFI machines with no i8042 it cannot read USB keys (Limine exits UEFI boot services before handover, and only Runtime Services survive), so it auto-reboots after a timeout instead of hanging. Tune the timeout via `WAIT_KEY_TIMEOUT_TICKS` in `include/limine.inc` (TSC ticks, ~30 s default assuming a 2 GHz TSC).
 3. Append a new entry to `limine.conf` pointing at `boot():/boot/NN_name.elf`.
 4. Add the demo name to the `DEMOS` list in `Makefile`.
 
